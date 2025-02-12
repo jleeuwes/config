@@ -1,6 +1,6 @@
 { komputiloj, privata, hello-infra, nixpkgsCurrent, nixpkgsFuture, ... }:
 rec {
-    targetHost = "scarif.radstand.nl"; # TODO configure duckdns
+    targetHost = "scarif.radstand.nl";
     inherit (privata.machines.scarif) masterAgeKey;
     sshPublicKeys = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFN+m0J0mjJBDho4cTqt9OlnbMUtYuj6OacT7VWi/ahC";
     nixosSystem = nixpkgsCurrent.lib.nixosSystem {
@@ -9,13 +9,6 @@ rec {
     };
 
     mainModule = { config, pkgs, lib, ... }: {
-        # # Add the --option extra-builtins-file to nix
-        # # using a magic spell from https://elvishjerricco.github.io/2018/06/24/secure-declarative-key-management.html
-        # (Doesn't work: warning: ignoring the user-specified setting 'extra-builtins-file', because it is a restricted setting and you are not a trusted user)
-        # nix.extraOptions = ''
-        #     plugin-files = ${pkgs.nix-plugins.override { nix = config.nix.package; }}/lib/nix/plugins/libnix-extra-builtins.so
-        # '';
-        
         # We need to construct our own NIX_PATH, because the default becomes very weird with our scheme.
         # Also, make sure you don't have a ~/.nix-defexpr because that gets added
         # too (see /etc/set-environment).
@@ -24,48 +17,20 @@ rec {
             # our sources.nix in the nix-store. With toString the literal path is
             # used instead.
             "nixpkgs=${nixpkgsCurrent}"
-            # I don't think we need these during normal operation:
-            # "komputiloj=${builtins.toString <komputiloj>}"
-            # "nixos-config=${builtins.toString <nixos-config>}"
         ];
         
         # Get rid of dependency on whole nixpkgs source tree (400MB)
         nix.registry = lib.mkForce {};
 
-        nixpkgs.config = {
-            # Selectively allow some unfree packages
-            # - https://nixos.org/nixpkgs/manual/#sec-allow-unfree
-            allowUnfreePredicate = pkg:
-                builtins.elem (lib.getName pkg) [
-                    "steam-run"
-                    "steam-original"
-                    "android-studio"
-                    "symbola" # non-commercial, no modifications,
-                              # no redistribution, "a single instantiation and no
-                              # network installation"
-                ];
-
-            # Selectively allow some packages with known vulnerabilities
-            # - https://nixos.org/manual/nixpkgs/stable/#sec-allow-insecure
-            permittedInsecurePackages = [
-                "python2.7-urllib3-1.26.2" # used by... something? TODO get rid of it
-                "python2.7-pyjwt-1.7.1"    # TODO get rid of this
-            ];
-        };
         nixpkgs.overlays = [
             komputiloj.overlays.undesired-packages
         ];
 
-        imports =
-            [
-                ./hardware-configuration.nix
-                komputiloj.modules.ssh-client-config
-                komputiloj.modules.librewolf
-            ];
+        imports = [
+            ./hardware-configuration.nix
+            komputiloj.modules.ssh-client-config
+        ];
         
-
-        # Make sure ~/bin is added to PATH:
-        environment.homeBinInPath = true;
 
         # Use the systemd-boot EFI boot loader.
         boot.loader.systemd-boot.enable = true;
@@ -76,16 +41,6 @@ rec {
 
         # Enable read-write NTFS support:
         boot.supportedFilesystems = [ "ntfs" ];
-
-        # Here I was looking into creating a ramfs mount with /tmp properties
-        # (i.e. anyone can write) for temporarily decripted keys.
-        # However, this is discouraged as size limits are not enforced?
-        # Anyway, we don't have swap on this system so we just use /tmp.
-        # boot.specialFileSystems = {
-        #     "/run/stuff" = {
-        #         fsType = "ramfs";
-        #         options = [ "nosuid" "nodev" "mode=01777" "size=100M" ];/swap
-        # };
 
         networking = {
             hostName = "scarif";
@@ -112,129 +67,21 @@ rec {
         # Set your time zone.
         time.timeZone = "Europe/Amsterdam";
 
-        fonts = {
-            enableDefaultPackages = true; # <- dit lijkt niet echt iets uit te maken t.o.v.  weglaten
-            packages = [
-                # nerdfonts is HUGE and nixos-rebuild hangs without progress information
-                # (withFont does not help)
-                # (also it is a useless font for emoji - it has nice icons but only
-                # custom ones, not stuff actually defined in unicode)
-                # (pkgs.nerdfonts.override { withFont = "SpaceMono"; })
-                # noto is veelbelovend maar sommige emoji zijn kleur (niet zo erg) en ENORM (wel erg)
-                # pkgs.noto-fonts-emoji
-                # pkgs.noto-fonts
-                # We weten nu trouwens zeker dat er een of ander fallback-systeem aan
-                # het werk is, want ook als je andere fonts kiest en noto-fonts-emoji is
-                # aanwezig krijg je emoji.
-                # WE HEBBEN EEN WINNAAR!
-                # symbola heeft mooie zwartwit-emoji op normale grootte.
-                # woooooooot \o/
-                # UPDATE 30 oktober: dit is kapot, ik zie nu kleur-emoji
-                # UPDATE 2024: upstream is verdwenen
-                # pkgs.symbola
-
-                pkgs.dejavu_fonts
-                pkgs.ubuntu_font_family
-            ];
-        };
-
-        # List packages installed in system profile. To search by name, run:
-        # $ nix-env -qaP | grep wget
-        environment.systemPackages = let
-            # this incomprehensible magic incantation was conjured by TheMsDosNerd at https://www.reddit.com/r/NixOS/comments/8cq4ic/problem_installing_python_package/
-            myPythonPackages = pythonPackages: with pythonPackages; [
-                    # flask
-                    # flask-api
-            ]; in with pkgs; [
-            
-            # enhance nix-build
-            nix-output-monitor
-
-            # for running precompiled games:
-            steam-run-native
-
-            ocrad
-
-            # usefull programs:
-            mkpasswd
-            unicode-paracode
-            gitFull vim file subversionClient pciutils pmount squashfsTools
-            parted gparted
-            wget rtorrent
-            sshpass
-            gnupg paperkey qrencode zbar pwgen
-            komputiloj.packages.wachtwoord
-            inetutils # for ftp for the nas
-            openssl
-            nmap
-            tree
-
-            pamix pavucontrol alsaUtils
-            zstd # for unpacking arch packages
-            glxinfo
-            xorg.xdpyinfo
-            xorg.xev
-            
-            # Install scanimage (saneBackends) and scanadf (saneFrontends),
-            # among other scanning tools.
-            # I can't get ADF scanning to work. 'Best' command line is:
-            #     scanimage -d pixma:04A91824_214FE1 --batch=scan%02d.png --format tiff --batch-start 1 --batch-double --batch-count 3 --source "Automatic Document Feeder"
-            # But it gives "scanimage: sane_read: Operation was cancelled"
-            # - this is probably related to https://gitlab.com/sane-project/backends/-/merge_requests/213
-            sane-backends sane-frontends
-            
-            # programming:
-            (python3.withPackages myPythonPackages)
-            dejsonlz4 # for reading firefox jsonlz4 files
-            remarshal # for yaml2json etc
-            jq # json manipulation
-            # jetbrains.idea-community
-            openjdk11 maven visualvm
-            # love_11
-            # arduino
-            haskellPackages.ghc
-            
-            # unstable.android-studio
-            # apktool dex1jar
-
-            # LaTeX and PDF:
-            # (Not sure if rubber uses the chosen texlive distribution)
-            # texlive.combined.scheme-medium
-            # rubber
-            poppler_utils
-            qpdf pdftk
-
-            firefox thunderbird # librewolf is configured through programs.librewolf
-            # isync # for e-mail backups (eigenlijk mbsync)
-            chromium
-            geany
+        environment.systemPackages = with pkgs; [
             zathura # pdf viewer
-            # mindmapping-tools:
-            vym freemind
-            vlc ffmpeg
-            beets
+            vlc
 
-            inkscape gimp exiftool
-            imagemagick scrot
-            libreoffice antiword
+            inkscape gimp
+            libreoffice
             audacity
             
-            pstree
-            
-            # Belgian eID (it looks in /run/current-system/sw/ by default for some things so it's easier to have it installed system-wide):
-            # eid-mw
-
-            # other package managers (to be used for non-reproducable things only):
-            # nodejs #npm
-
             zip unzip
-            par2cmdline # for error-correcting archives
-            llvmPackages.bintools # to get ar (to extract .deb files)
-            sqlite
         ];
 
-        programs.librewolf = {
+        programs.firefox = {
             enable = true;
+
+            # TODO configure search engines
 
             languagePacks = [ "nl" "en-US" ];
 
@@ -242,7 +89,7 @@ rec {
                 # https://mozilla.github.io/policy-templates/
                 ExtensionSettings = {
                     "*" = {
-                        blocked_install_message = "Dit moet via Nix.";
+                        blocked_install_message = "Vraag dit even aan Jeroen :)";
                         installation_mode = "blocked";
                     };
                     "gdpr@cavi.au.dk" = {
@@ -260,6 +107,10 @@ rec {
                     };
                 };
             };
+        };
+
+        programs.thunderbird = {
+            enable = true;
         };
 
         programs.gnupg.agent = {
@@ -324,20 +175,21 @@ rec {
         # services.gvfs.enable = true;
         # services.gvfs.package = pkgs.xfce.gvfs;
         
-        # Enable sound.
-        sound.enable = true;
-        sound.extraConfig = ''
-            pcm.pulse {
-              type pulse
-              hint.description "PulseAudio device for audacity"
-            }
-            ctl.pulse {
-              type pulse
-            }
-        '';
-        hardware.pulseaudio.enable = true;
-        # Some NixOS packages can be built with explicit PulseAudio support which is disabled by default. This support can be enabled in all applicable packages by setting:
-        nixpkgs.config.pulseaudio = true;
+        # Enable sound with pipewire
+        hardware.pulseaudio.enable = false;
+        security.rtkit.enable = true;
+        services.pipewire = {
+          enable = true;
+          alsa.enable = true;
+          alsa.support32Bit = true;
+          pulse.enable = true;
+          # If you want to use JACK applications, uncomment this
+          #jack.enable = true;
+
+          # use the example session manager (no others are packaged yet so this is enabled by default,
+          # no need to redefine it in your config for now)
+          #media-session.enable = true;
+        };
 
         hardware.bluetooth = {
             enable = true;
@@ -355,15 +207,11 @@ rec {
         # Enable adb group and udev rules and such:
         programs.adb.enable = true;
 
-        # For 32-bit games:
-        hardware.opengl.driSupport32Bit = true;
-        hardware.opengl.driSupport = true; # is actually the default
-        
         users.users.root = {
-			openssh.authorizedKeys.keys = [
-			    # Always have a key here, otherwise we can't deploy.
-				komputiloj.users.jeroen.sshKeys.ferrix
-			];
+            openssh.authorizedKeys.keys = [
+                # Always have a key here, otherwise we can't deploy.
+                komputiloj.users.jeroen.sshKeys.ferrix
+            ];
             
         };
         # Define a user account. Don't forget to set a password with ‘passwd’.
@@ -371,9 +219,7 @@ rec {
             uid = komputiloj.users.jeroen.linux.uid;
             isNormalUser = true;
             description = komputiloj.users.jeroen.fullName;
-            extraGroups = [ "wheel" "network-manager" "dialout" "adbusers" "video" "audio"
-                "lp" # for scanning with Canon
-            ];
+            extraGroups = [ "wheel" "network-manager" "dialout" "adbusers" "video" "audio" ];
         };
         users.users.karin = {
             uid = hello-infra.users.karin.linux.uid;
