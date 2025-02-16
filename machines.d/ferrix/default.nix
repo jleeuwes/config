@@ -414,6 +414,23 @@ rec {
             };
         };
         services.desktopManager.plasma6.enable = true;
+        
+        systemd.services."getty@tty6" = {
+            serviceConfig = {
+                ExecStart = [
+                    # https://wiki.archlinux.org/title/Getty#Automatic_login_to_virtual_console
+                    # TODO: https://wiki.archlinux.org/title/Xinit#Autostart_X_at_login
+                    ""
+                    "${pkgs.util-linux}/bin/agetty -o '-p -f -- \\\\u' --noclear --autologin speel tty6 $TERM"
+                ];
+            };
+
+            # https://wiki.archlinux.org/title/Getty#Automatic_login_to_virtual_console
+            overrideStrategy = "asDropin";
+
+            restartIfChanged = false;
+        };
+
         services.xserver.xkb = {
           layout = "us";
           options = "compose:ralt,eurosign:e";
